@@ -1,0 +1,341 @@
+---
+params: 
+    set_title: "DESTATIS online job ad report"
+output:
+  
+  pdf_document: default
+  html_notebook: default
+  word_document: default
+  html_document:
+    df_print: paged
+fig_width: 6
+fig_height: 4 
+---
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "/int_daten/HOME/delazzer-j/DataLab/")
+knitr::opts_chunk$set(echo=FALSE)
+
+```
+
+```{r, include=FALSE}
+library(RColorBrewer)
+#library(xlsx)
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+library(Hmisc)
+library(data.table)
+library(fst)
+library(magrittr)
+library(lubridate)
+library(kableExtra)
+```
+
+
+```{r , include=FALSE, echo=FALSE}
+#Chosedate  for which the report should be displayed
+rdate <- ymd("2020-3-1")
+#start date of time series
+startdate <- ymd("2018-7-1")
+
+elapsed_months <- function(end_date, start_date) {
+  ed <- as.POSIXlt(end_date)
+  sd <- as.POSIXlt(start_date)
+  12 * (ed$year - sd$year) + (ed$mon - sd$mon)
+}
+
+mdiff <- elapsed_months(rdate, startdate)
+
+# Validity #
+valid <- 30
+
+#adapt paths according to your own file structure
+
+path <- "alldata_june20/"
+resultspath <- "Results/like_AU/"
+
+load(paste0(resultspath, "tables_", rdate ,".rdata"))
+load(paste0(resultspath, "intermediate_results_", rdate, ".rdata"))
+
+date <- (as.Date(statemeans$date, origin = "1970-01-01") )
+
+snames <- readRDS(paste0(resultspath, "snames_", rdate, ".rds"))
+onames <- readRDS(paste0(resultspath, "onames_", rdate, ".rds"))
+enames <- readRDS( paste0(resultspath, "enames_", rdate, ".rds"))
+
+stock <- as.character(round(allmeans[length(allmeans)],0))
+ind <- round((allmeans[1]/allmeans[length(allmeans)])*100, 1)
+base <- format(date[1], "%b-%Y")
+mtm <- round(totaltab[2,4]*100, 1)
+yty <-  round(totaltab[4,4]*100, 1)
+
+ryear <- year(rdate)
+rmonth <- month(rdate, label = TRUE, abbr = FALSE, locale = "en_GB")
+
+#params <- data.frame(set_title = paste("DESTATIS online job ad report,", rmonth, ryear), stringsAsFactors = FALSE)
+```
+
+---
+title: `r paste("DESTATIS online job ad report,", rmonth, ryear)`
+---
+
+This report presents a monthly update on the online job market for Germany. It is based on data collected by webscraping of more than 100 sources (online job portals).
+
+## Key points
+
+* Stock of job ads: **`r stock`**   
+* Index: **`r ind`**    (`r base` = 100)  
+* Over the month: **`r mtm`%**  
+* Over the year: **`r yty`%**
+
+The index of online job ads fell by 7.4 percent in March 2020. Compared to the same month the previous year, the number of job ads decreased by 40 percent. 
+
+## Online job ads vs unemployment rate index
+```{r }
+#################### Plot the monthly index against UE rate ================================
+index <- allmeans/allmeans[1]
+date <- (as.Date(statemeans$date, origin = "1970-01-01") )
+wmat <- data.frame( date = date, oja_index = index)
+filename <- Sys.glob("Auxiliary data/unemployment/endergebnisse_monat*")
+ue1 <- read_excel(filename, trim_ws = TRUE, sheet = "Monat_Originalwerte_Quoten", range = paste0("A339:A",(339+mdiff)) , col_names = "date")
+ue2 <- read_excel(filename, trim_ws = TRUE, sheet = "Monat_Originalwerte_Quoten", range = paste0("CO339:CO",(339+mdiff)) ,col_names = "unemployment_rate")
+ue <- data.frame(ue1, ue2)
+ue$date <- ymd(ue$date)
+uemat <- left_join(wmat, ue, by="date")
+uemat_long <- reshape2::melt(subset(uemat), id.vars = "date")
+
+coeff <- (uemat$unemployment_rate[1])-1
+
+ggplot(uemat, aes(x=date))+
+  geom_line(aes(y = oja_index, color = "red"))+
+  geom_line(aes(y = unemployment_rate-coeff , color = "blue"))+
+  geom_point(aes(y = oja_index, color = "red"))+
+  geom_point(aes(y = unemployment_rate-coeff , color = "blue"))+
+  scale_y_continuous(
+    # Features of the first axis
+    name = "Job ad index",
+      # Add a second axis and specify its features
+    sec.axis = sec_axis(~.+coeff, name="Unemployment rate"))+
+  theme(legend.title=element_blank(), axis.text.x=element_text(angle=45,hjust=1,size=8), legend.position="top")+
+  scale_x_date(date_breaks = "1 month", date_labels =  "%b %Y")+
+  labs( caption = "Job ad index normalized to 07.2018. Unemployment source: German Labour Force Survey") + 
+  scale_colour_discrete(labels=c("Unemployment rate", "Job ad index")) 
+
+```
+
+
+## Job ads by federal state
+### Annual change in job ads by federal state
+
+```{r, warnings = FALSE}
+##################### Plot annual change by state =========================
+
+mat <- subset(statestab, select = - c(type, current_t,  lagged_t) )
+mat <- mat[4,]
+mat <- gather(mat)
+mat$value <- mat$value*100
+snames$key <- as.character(snames$key)
+mat <- left_join(mat, snames, by= "key")
+mat <- mat %>% mutate(pos = value >= 0)
+ggplot(mat, aes(state, value,  fill = pos)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs( x = "", y = "percentage change") + 
+        theme(legend.position="none", axis.text.x = element_text(angle=60, vjust=1, hjust= 1)) +
+  geom_text(aes(y = value, label = value), color = "black", size = 2.5, position = position_stack(vjust = 0.5, reverse = FALSE))
+
+```
+
+Compared with the same month one year ago, the number of job ads fell in all federal states. The size of the drop varies between states, with the smallest reduction occurring in Sachsen-Anhalt (-30%) and the largest drop in Baden-Württemberg (-46.4%). 
+Compared with the previous month, job ads fell in all federal states. Job ads fell especially strongly in Mecklenburg-Vorpommern and Sachsen-Anhalt.  
+  
+    
+
+### Changes and stocks of job ads by federal state
+```{r, echo=FALSE}
+
+########Table of federal states ==============
+for (i in 1:nrow(statestab)) {
+  tmp <- gather(statestab[i,4:ncol(statestab)])
+  
+  if (i == 1) {
+    ntab <- tmp
+  } else {
+    
+    ntab <- left_join(ntab, tmp, by= "key")
+  }
+}
+ntab[,3] <-ntab[,3]*100 
+ntab[,5] <-ntab[,5]*100 
+
+ntab$stock <- round(as.numeric(statemeans[nrow(statemeans), 2:(ncol(statemeans)-1)]),0)
+snames <- snames %>% mutate_all(as.character)
+ntab <- left_join(snames, ntab, by= "key")
+ntab <- subset(ntab, select = -key)
+colnames(ntab) <- c("Federal state", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+
+ntab <- ntab[order(ntab$`Federal state`),]
+
+kable(ntab, row.names = FALSE) %>% kable_styling(latex_options =c("striped", "scale_down"))
+```
+
+## Job ads by occupation
+### Annual change in job ads by occupation (ISCO 1-digit occupations)
+
+
+```{r}
+
+##################### Plot annual change by occupation =========================
+
+onames$occupation <- c("Technicians", "Craft workers", "Clerical support workers", "Professionals", "Managers", "Plant and machine operators", "Service and sales workers", "Elementary occupations", "Agricultural, forestry and fishery")
+
+mat <- subset(occutab, select = - c(type, current_t,  lagged_t) )
+mat <- mat[4,]
+mat <- gather(mat)
+mat$value <- mat$value*100
+onames <- onames %>% mutate_all(as.character)
+mat <- left_join(mat, onames, by = "key")
+mat <- mat %>% mutate(pos = value >= 0)
+
+
+ggplot(mat, aes(occupation, value,  fill = pos)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs( x = "", y = "percentage change") + 
+  theme(legend.position="none", axis.text.x = element_text(angle=60, vjust=1, hjust= 1)) +
+  geom_text(aes(y = value, label = value), color = "black", size = 2.5, position = position_stack(vjust = 0.5, reverse = FALSE))+ scale_fill_brewer(palette = "Set1")
+
+```
+
+
+### Changes and stocks of job ads by occupation (ISCO 1-digit occupations)
+```{r, echo=FALSE}
+
+
+########Table of occupation groups ==============
+
+for (i in 1:nrow(occutab)) {
+  tmp <- gather(occutab[i,4:ncol(occutab)])
+  
+  if (i == 1) {
+    ntab <- tmp
+  } else {
+      
+    ntab <- left_join(ntab, tmp, by= "key")
+    }
+}
+
+ntab[,3] <-ntab[,3]*100 
+ntab[,5] <-ntab[,5]*100 
+ntab$stock <- round(as.numeric(occmeans[nrow(occmeans), 2:(ncol(occmeans)-1)]),0)
+onames <- onames %>% mutate_all(as.character)
+ntab <- left_join(onames, ntab, by= "key")
+ntab <- subset(ntab, select = -key)
+colnames(ntab) <- c("Occupation", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+
+kable(ntab)  %>% kable_styling(latex_options =c("striped", "scale_down"))
+```
+
+### Top 10 most advertised occupations `r paste(rmonth, ryear)` (ISCO 3-digit occupations)
+
+```{r,  echo=FALSE}
+
+load(paste0(resultspath, "top10_", rdate, ".rdata"))
+
+colnames(esco3top10) <- c("Occupation", "Job_ads", "Share(%)")
+
+kable(esco3top10)  
+```
+
+## Top 10 advertised employers `r paste(rmonth, ryear)`
+
+```{r}
+
+companytop10 <- data.frame(Companyname = companytop10$Companyname, Job_ads = round(companytop10$Job_ads), sector = companytop10$`Industry sector`)
+
+colnames(companytop10) <- c("Companyname", "Job ads (monthly)", "Industry sector")
+
+companytop10$Companyname <- c("Hofmann GmbH", "Amadeus Fire", "Brunel GmbH", "Deutsche Bahn", "Xing People Logistic GmbH", "Plan Industrieservice GmbH", "Stepstone", "Job Server", "Arbeitgeber anonymisiert", "Timework GmbH")
+
+kable(companytop10)  %>% kable_styling(latex_options =c("striped", "scale_down"))
+```
+
+Some of the most frequently advertising employers in March 2020 are staffing agencies. This indicates that the filter used to remove staffing agencies from the sample is not efficient enough. Among the companies which are not staffing agencies, both Xing and Stepstone are listed as employers, despite them being job portals. It is implausible that those companies advertise open positions in the quantities observed. The high numbers of advertisements for those two companies suggest that the webscraping process sometimes erroneously assigns the name of the job portal instead of the company to a job ad. The industry sector classification for each company is the one assigned in the CEDEFOP dataset. It is apparent that the assigned industry sector is, in many cases, incorrect. For instance, Amadeus Fire, a staffing agency, is classified as a Manufacturing company. However, such inaccuracies are to be expected, because job ads often don't contain sufficient information about the company to reliably classify industry sectors. For this purpose, it would be necessary to link job ad data with other administrative or internet based sources by companyname. 
+
+## Change in job ads by education level
+### Annual change by education level (%)
+```{r}
+
+##################### Plot annual change by education  level =========================
+
+mat <- subset(edutab, select = - c(type, current_t,  lagged_t) )
+mat <- mat[4,]
+mat <- gather(mat)
+
+mat$value <- mat$value*100
+
+enames <- enames %>% mutate_all(as.character)
+
+mat <- left_join(mat, enames, by= "key")
+mat <- mat %>% mutate(pos = value >= 0)
+
+ggplot(mat, aes(education, value,  fill = pos)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs( x = "", y = "percentage change") + 
+  theme(legend.position="none", axis.text.x = element_text(angle=60, vjust=1, hjust= 1)) +
+  geom_text(aes(y = value, label = value), color = "black", size = 2.5, position = position_stack(vjust = 0.5, reverse = FALSE))+ scale_fill_brewer(palette = "Set2")
+```
+
+
+### Changes and stocks of job ads by education level
+
+```{r, echo=FALSE}
+########Table of education groups ==============
+
+for (i in 1:nrow(edutab)) {
+  tmp <- gather(edutab[i,4:ncol(edutab)])
+  
+  if (i == 1) {
+    ntab <- tmp
+  } else {
+    
+    ntab <- left_join(ntab, tmp, by= "key")
+  }
+}
+
+ntab[,3] <-ntab[,3]*100 
+ntab[,5] <-ntab[,5]*100 
+
+ntab$stock <- round(as.numeric(edumeans[nrow(edumeans), 2:(ncol(edumeans)-1)]),0)
+
+enames <- enames %>% mutate_all(as.character)
+
+ntab <- left_join(enames, ntab, by= "key")
+
+ntab <- subset(ntab, select = -key)
+
+colnames(ntab) <- c("Education", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+
+ntab$Education <- c("Short-cycle tertiary", "Upper secondary", "Master or equivalent", "Bachelor or equivalent", "Post-secondary non-tertiary", "Doctoral or equivalent", "Lower secondary", "Primary"  )
+
+
+kable(ntab) %>% kable_styling(latex_options =c("striped", "scale_down"))
+
+```
+
+
+
+#### Annual change by federal state (%)
+This line needs to be here to avoid major fuckups by Rstudio
+
+
+
+
+
+#### Annual change by federal state (%)
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
