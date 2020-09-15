@@ -36,6 +36,7 @@ library(fst)
 library(magrittr)
 library(lubridate)
 library(kableExtra)
+library(sf)
 ```
 
 
@@ -178,9 +179,13 @@ ntab$stock <- round(as.numeric(statemeans[nrow(statemeans), 2:(ncol(statemeans)-
 snames <- snames %>% mutate_all(as.character)
 ntab <- left_join(snames, ntab, by= "key")
 ntab <- subset(ntab, select = -key)
-colnames(ntab) <- c("Federal state", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+ntab$share <- ntab$stock/sum(ntab$stock)
+ntab$share <- round(ntab$share, 3)*100
+
+colnames(ntab) <- c("Federal state", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock", "share (%)")
 
 ntab <- ntab[order(ntab$`Federal state`),]
+
 
 kable(ntab, row.names = FALSE) %>% kable_styling(latex_options =c("striped", "scale_down"))
 ```
@@ -236,7 +241,9 @@ ntab$stock <- round(as.numeric(occmeans[nrow(occmeans), 2:(ncol(occmeans)-1)]),0
 onames <- onames %>% mutate_all(as.character)
 ntab <- left_join(onames, ntab, by= "key")
 ntab <- subset(ntab, select = -key)
-colnames(ntab) <- c("Occupation", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+ntab$share <- ntab$stock/sum(ntab$stock)
+ntab$share <- round(ntab$share, 3)*100
+colnames(ntab) <- c("Occupation", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock", "share (%)")
 
 kable(ntab)  %>% kable_styling(latex_options =c("striped", "scale_down"))
 ```
@@ -312,6 +319,8 @@ ntab[,3] <-ntab[,3]*100
 ntab[,5] <-ntab[,5]*100 
 
 ntab$stock <- round(as.numeric(edumeans[nrow(edumeans), 2:(ncol(edumeans)-1)]),0)
+ntab$share <- ntab$stock/sum(ntab$stock)
+ntab$share <- round(ntab$share, 3)*100
 
 enames <- enames %>% mutate_all(as.character)
 
@@ -319,7 +328,7 @@ ntab <- left_join(enames, ntab, by= "key")
 
 ntab <- subset(ntab, select = -key)
 
-colnames(ntab) <- c("Education", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock")
+colnames(ntab) <- c("Education", "monthly change (no)", "monthly change (%)", "yearly change", "yearly change (%)", "stock", "share (%)")
 
 ntab$Education <- c("Short-cycle tertiary", "Upper secondary", "Master or equivalent", "Bachelor or equivalent", "Post-secondary non-tertiary", "Doctoral or equivalent", "Lower secondary", "Primary"  )
 
@@ -328,14 +337,71 @@ kable(ntab) %>% kable_styling(latex_options =c("striped", "scale_down"))
 
 ```
 
+### Distribution of monthly job ads by functional urban area (FUA)
+
+
+```{r}
+
+load(paste0(resultspath, "geo_intermediate_results.rdata"))
+
+statemeans$date <- as.Date(statemeans$date, origin = "1970-01-01")
+
+thismonth <- statemeans[nrow(statemeans),]
+thismonth <- subset(thismonth, select = -year)
+
+thismonth_long <- gather(thismonth, key = date )
+colnames(thismonth_long) <- c("fuacode_si", "job_ads")
+
+thismonth_long <- left_join(thismonth_long, sfile, by = "fuacode_si")
+
+thismonth_long$fuaname <- as.character(thismonth_long$fuaname)
+thismonth_long$fuaname_en <- as.character(thismonth_long$fuaname_en)
+
+thismonth_long$job_ads <- round(thismonth_long$job_ads)
+
+st_geometry(thismonth_long) <- thismonth_long$geometry
+
+thismonth_long <- st_zm(thismonth_long, drop = TRUE, what = "ZM")
+
+thismonth_long$label <- paste0(thismonth_long$fuaname_en, "\n ", as.character(thismonth_long$job_ads))
+
+#test <- thismonth_long[is.na(thismonth_long$fuaname),]
+
+thismonth_long$nudge_x <- 0
+
+thismonth_long$nudge_x[thismonth_long$fuaname_en == "Dusseldorf"] <- -1
+
+thismonth_long$nudge_y <- 0
+
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Bremerhaven"] <- +0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Braunschweig"] <- +0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Frankfurt am Main"] <- +0.15
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Darmstadt"] <- -0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Kaiserslautern"] <- +0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Villingen-Schwenningen"] <- +0.15
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Zwickau"] <- -0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Bremen"] <- -0.1
+thismonth_long$nudge_y[thismonth_long$fuaname_en == "Monchengladbach"] <- -0.1
+
+options(warn = - 1)
+  
+ggplot(thismonth_long) +
+  geom_sf( aes(fill = job_ads))+
+  theme_void() +
+  theme(panel.grid.major = element_line(colour = "transparent")) +
+  scale_fill_gradient2(name = "Job ads",low="lightblue", high="red")+
+  geom_sf_text(aes(label = fuaname_en), size = 2, colour = "black", nudge_y = thismonth_long$nudge_y , nudge_x = thismonth_long$nudge_x)+
+  geom_sf(data=de,alpha = 0)
+
+options(warn = 0)
+
+```
+
+Not all areas of the map are covered by functional urban areas, mostly rural regions or regions without large cities. Job ads are concentrated in major industrial and business centers, for instance in Hamburg or Munich. Berlin-Brandenburg, on the other hand, has relatively low GDP per capita, but due to its sheer size, a large number of job ads are posted there (~3.5 million inhabitants in Berlin alone). 
 
 
 #### Annual change by federal state (%)
-This line needs to be here to avoid major fuckups by Rstudio
+Test
 
 
 
-
-
-#### Annual change by federal state (%)
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
